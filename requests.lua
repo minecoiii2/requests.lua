@@ -79,7 +79,7 @@ function request.json(self: Request): any
 end
 
 -- constructor
-function request.new(url: string, method: HttpMethod, headers: {}?, data: any?, compress: boolean?)
+function request.request(url: string, method: HttpMethod, headers: {}?, data: any?, compress: boolean?)
 	local editedUrl = ((if request.baseUrl == nil then '' else request.baseUrl) .. url)
 	
 	editedUrl = editedUrl:gsub('(.+)%.roblox%.com', '%1.roproxy.com')
