@@ -15,7 +15,9 @@ export type Request = {
 	completed: boolean,
 	ok: boolean,
 	status: number,
+	status_type: number,
 	content: string,
+	error: string,
 	
 	json: (Request) -> any?,
 	
@@ -35,6 +37,7 @@ end
 -- send the request
 function request.send(self: Request)
 	self.completed = false
+	self.error = ''
 
 	local req = self.request
 	local ok, result = pcall(http.RequestAsync, http, {
@@ -54,9 +57,10 @@ function request.send(self: Request)
 		self.status = 200
 		self.content = result
 	else
+		self.error = result
 		local err: string = result:lower()
 		
-		if err:find('http') then
+		if err:find('http') == 1 then
 			local status_code = err:match("%d%d%d")
 			
 			if status_code == nil then
@@ -68,6 +72,8 @@ function request.send(self: Request)
 			self.status = 400
 		end
 	end
+
+	self.status_type = tonumber(tostring(self.status):sub(1, 1))
 	
 	return self
 end
@@ -96,7 +102,9 @@ function request.request(url: string, method: HttpMethod, headers: {}?, data: an
 		completed = false,
 		ok = false,
 		status = 100,
+		status_type = 1,
 		content = '',
+		error = '',
 	}, request)
 	
 	return self:send() :: Request
