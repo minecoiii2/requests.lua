@@ -13,12 +13,15 @@ ill most likely update this module a few more times to give it a few features in
 
 download or paste the module inside roblox
 require the module like so
+
 `local requests = require(path.to.module)`
 
 this is the base function, other functions such as .get and .post use .request under the hood with auto-filled parameters
+
 `requests.request(...)`
 
 `requests.get(url: string, headers: any)`
+
 `requests.post(url: string, headers: any, data: any, compress: boolean?)`
 
 send all the requests you want
