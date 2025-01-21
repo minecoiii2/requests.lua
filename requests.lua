@@ -2,78 +2,97 @@
 
 local http = game:GetService("HttpService")
 
-export type HttpMethod = 'GET'|'POST'|'PATCH'|'DELETE'|'PUT'|'OPTIONS'
+export type HttpMethod = 'GET'|'POST'|'PATCH'|'DELETE'|'PUT'|'OPTIONS'|'HEAD'
 export type Request = {
 	request: {
 		url: string,
 		method: HttpMethod,
 		headers: {}?,
-		data: any?,
+		data: string?,
 		compress: boolean,
 	},
-	
+
 	completed: boolean,
+	debounce: boolean,
 	ok: boolean,
+	headers: {},
 	status: number,
 	status_type: number,
 	content: string,
 	error: string,
-	
+
 	json: (Request) -> any?,
-	
+
 	send: (Request) -> Request,
+	_set_status: (Request, code: number) -> nil,
 }
 
 local request = {
-	baseUrl = nil
+	baseUrl = nil,
+	baseHeaders = nil,
+	debug = false,
 }
-request.__index = request
 
--- sets a prefix for all requests
-function request.set_base_url(url: string?)
-	request.baseUrl = url
+function request._set_status(self: Request, code: number)
+	self.status = code
+	self.status_type = tonumber(tostring(self.status):sub(1, 1)) :: number
+	self.ok = self.status_type == 2
 end
 
 -- send the request
 function request.send(self: Request)
+	assert(not self.debounce, 'cannot send while another request is on-going')
 	self.completed = false
-	self.error = ''
-
-	local req = self.request
-	local ok, result = pcall(http.RequestAsync, http, {
-		Url = req.url,
-		Method = req.method,
-		Headers = req.headers,
-		Data = http:JSONEncode(req.data),
-		Compress = Enum.HttpCompression[if req.compress then 'Gzip' else 'None']
-	}) 
+	self.debounce = true
+	self:_set_status(100)
 	
-	result = if result == nil then '' else tostring(result)
+	local req = self.request
+	local body = req.data 
+	local url = req.url
+	local headers = req.headers
+	
+	local compress = req.compress do
+		local alg = if compress then 'Gzip' else nil
+		compress = Enum.HttpCompression[alg or 'None']
+	end
+	
+	if request.debug then
+		print(
+			req.method,
+			url,
+			headers,
+			body,
+			compress
+		)
+	end
+	
+	local response = http:RequestAsync({
+		Url = url,
+		Method = req.method,
+		Headers = headers,
+		Body = body,
+		Compress = compress
+	}) :: {
+		Success: boolean,
+		StatusCode: number,
+		StatusMessage: string,
+		Headers: {},
+		Body: string?,
+	}
+	response.Body = response.Body or ''
+	
+	if request.debug then
+		print(response.StatusCode, response.Body)
+	end
 	
 	self.completed = true
-	self.ok = ok
+	self.debounce = false
 	
-	if ok then
-		self.status = 200
-		self.content = result
-	else
-		self.error = result
-		local err: string = result:lower()
-		
-		if err:find('http') == 1 then
-			local status_code = err:match("%d%d%d")
-			
-			if status_code == nil then
-				self.status = 400
-			else
-				self.status = tonumber(status_code) :: number
-			end
-		else
-			self.status = 400
-		end
-	end
-
-	self.status_type = tonumber(tostring(self.status):sub(1, 1))
+	self:_set_status(response.StatusCode)
+	
+	self.headers = response.Headers
+	self.content = if self.ok then response.Body else ''
+	self.error = if not self.ok then response.StatusMessage else ''
 	
 	return self
 end
@@ -81,33 +100,85 @@ end
 -- retrieve json from response
 function request.json(self: Request): any
 	assert(self.completed, 'request needs to be completed')
-	return http:JSONDecode(self.content)
+	if not self.ok then return nil end
+	local data = http:JSONDecode(self.content)
+	if data._request == nil then
+		data._request = self
+	end
+	return data
 end
 
--- constructor
-function request.request(url: string, method: HttpMethod, headers: {}?, data: any?, compress: boolean?)
-	local editedUrl = ((if request.baseUrl == nil then '' else request.baseUrl) .. url)
+-- constructors
+
+type exampleHeader = {Authorization: string?, Accept: string?}|{}
+
+-- base constructor
+function request.request(
+	method: HttpMethod, 
+	url: string, 
+	headers: exampleHeader?, 
+	data: string|any?, 
+	compress: boolean?
+): Request
 	
-	editedUrl = editedUrl:gsub('(.+)%.roblox%.com', '%1.roproxy.com')
+	local url = (
+		(if request.baseUrl == nil then '' else request.baseUrl) .. url
+	)
+		:gsub('(.+)%.roblox%.com', '%1.roproxy.com') -- change roblox to compatible proxy
+		:gsub('([^:])(\/+)', '%1/') -- remove double slashes
+	
+	local bodyless = method == 'GET' or method == 'HEAD'
+	
+	local data = data do
+		if typeof(data) == 'table' then
+			data = http:JSONEncode(data)
+		end
+		
+		if bodyless then
+			data = nil
+		end
+	end
+	
+	local headers = headers do
+		if headers ~= nil then
+			assert(headers['User-Agent'] == nil, 'User-Agent is locked')
+		end
+	end
+	
+	local compress = (compress or false) do
+		if bodyless then
+			compress = false
+		end
+	end
 	
 	local self = setmetatable({
 		request = {
-			url = editedUrl,
+			url = url,
 			method = method,
-			headers = headers,
+			headers = headers or request.baseHeaders,
 			data = data,
 			compress = compress or false,
 		},
-		
+
 		completed = false,
-		ok = false,
-		status = 100,
-		status_type = 1,
+		debounce = false,
 		content = '',
 		error = '',
-	}, request)
+	}, {
+		__index = request
+	})
 	
+	self:_set_status(100)
+
 	return self:send() :: Request
+end
+
+function request.post(url: string, headers: exampleHeader?, data: string|any?, compress: boolean?)
+	return request.request('POST', url, headers, data, compress)
+end
+
+function request.get(url: string, headers: exampleHeader?)
+	return request.request('GET', url, headers)
 end
 
 return request
