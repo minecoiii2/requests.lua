@@ -2,6 +2,8 @@
 
 requests.lua aims to replicate pythons 'requests' lib
 
+Note: This library isnt the best, i realize i made some technical imperfections and this is most useless. I dont recommend using this
+
 only compatible with Roblox!!!!! 
 
 roblox heavily limits what you can see and not see with httpService.
